@@ -246,20 +246,22 @@ def calc_sigma_sq(options: pd.DataFrame, t: float, r: float, f: float) -> float:
     filtered_put_strikes = filtered_put_strikes.drop(columns=['bid', 'ask'])
 
     p_mask = (filtered_put_strikes['bid.1'] == 0) & (filtered_put_strikes['bid.1'].shift(-1) == 0)
-    p_max_row = filtered_put_strikes.index[p_mask].tolist()[-1]
-    # Get the row numbers where the condition is met
-    filtered_put_strikes = filtered_put_strikes[filtered_put_strikes.index >= p_max_row + 2]
-    filtered_put_strikes = filtered_put_strikes[filtered_put_strikes['bid.1'] != 0.0]
-
+    if p_mask.any():
+      p_max_row = filtered_put_strikes.index[p_mask].tolist()[-1]
+      filtered_put_strikes = filtered_put_strikes[filtered_put_strikes.index >= p_max_row + 2]
+      filtered_put_strikes = filtered_put_strikes[filtered_put_strikes['bid.1'] != 0.0]
+  
     # Evaluate Calls
     filtered_call_strikes = options[options['strike'] >= k0]
     filtered_call_strikes = filtered_call_strikes.drop(columns=['bid.1', 'ask.1'])
 
     c_mask = (filtered_call_strikes['bid'] == 0) & (filtered_call_strikes['bid'].shift(-1) == 0)
-    c_max_row = filtered_call_strikes.index[c_mask].tolist()[-1]
-    # Get the row numbers where the condition is met
-    filtered_call_strikes = filtered_call_strikes[filtered_call_strikes.index <= c_max_row - 2]
-    filtered_call_strikes = filtered_call_strikes[filtered_call_strikes['bid'] != 0.0]
+
+    if p_mask.any():
+      c_max_row = filtered_call_strikes.index[c_mask].tolist()[-1]
+      # Get the row numbers where the condition is met
+      filtered_call_strikes = filtered_call_strikes[filtered_call_strikes.index <= c_max_row - 2]
+      filtered_call_strikes = filtered_call_strikes[filtered_call_strikes['bid'] != 0.0]
 
     put_mid_point = (filtered_put_strikes['bid.1'] + filtered_put_strikes['ask.1']) / 2
     call_mid_point = (filtered_call_strikes['bid'] + filtered_call_strikes['ask']) / 2
@@ -730,7 +732,7 @@ def retrieve_yahoo_option_data(date):
       df_p['expiration_date'] = formatted_date
       df_p = df_p.drop(['expiration_date','contract', 'last','6','7','8', '9', '10'], axis=1)
 
-      merged_df = df_c.merge(df_p, on='strike', how='outer').fillna(0)
+      merged_df = df_c.merge(df_p, on='strike', how='outer').dropna()
       merged_df['expiration_date'] = formatted_date
 
 
@@ -771,13 +773,13 @@ def convert_to_int(value):
 # # Pull options from yahoo finance website data available on website is incomplete as compared to vix example.
 # # Requires user to have Chrome installed
 # # Refer to function retrieve_yahoo_option_data for data source. 
-# date = datetime.date.today()
-# retrieve_yahoo_option_data(date)
-# options_data_source = 2
+date = datetime.date.today()
+retrieve_yahoo_option_data(date)
+options_data_source = 2
 
 # Explicitly set the date for calculation (replace with your desired date)
-date = pd.to_datetime("2022-09-27").date()
-options_data_source = 3
+# date = pd.to_datetime("2022-09-27").date()
+# options_data_source = 3
 
 # Pull interest rates
 download_treasury_csv(date)
