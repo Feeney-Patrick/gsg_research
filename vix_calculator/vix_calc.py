@@ -14,6 +14,8 @@ import time
 import requests
 from yahoo_fin import stock_info as si
 from bs4 import BeautifulSoup
+import requests
+import json
 
 
 def minute_diff(datetime1: datetime.datetime, datetime2: datetime.datetime) -> int:
@@ -48,7 +50,6 @@ def minute_diff(datetime1: datetime.datetime, datetime2: datetime.datetime) -> i
 
   return minute_diff
 
-
 def select_option_strike_put_call(option: dict) -> tuple[float, float]:
   """
   This function selects the strike price and calculates the corresponding price difference 
@@ -67,8 +68,8 @@ def select_option_strike_put_call(option: dict) -> tuple[float, float]:
   """
 
   # Calculate the middle price for call and put options
-  mid_call = (option['bid'] + option['ask']) / 2
-  mid_put = (option['bid.1'] + option['ask.1']) / 2
+  mid_call = (option['bid_x'] + option['ask_x']) / 2
+  mid_put = (option['bid_y'] + option['ask_y']) / 2
 
   # Calculate the absolute difference in price between call and put options for each strike
   strike_diff = abs(mid_call - mid_put)
@@ -100,11 +101,8 @@ def select_near_next_date(options: pd.DataFrame, date: datetime.date, constant_m
                                            and the next expiration date (after), both as datetime.date objects.
   """
 
-  # Ensure consistent format for expiration dates (assuming '%a %b %d %Y' format)
-  options['expiration_date'] = pd.to_datetime(options['expiration_date'], format="%a %b %d %Y").dt.date
-
   # Extract unique expiration dates from the DataFrame
-  unique_dates = options['expiration_date'].unique()
+  unique_dates = pd.to_datetime(options['expiration_date'], format="%Y-%m-%d").dt.date.unique()
 
   # Include a candidate date with constant_maturity added as reference
   candidate_date = date + datetime.timedelta(days=constant_maturity)
@@ -121,8 +119,6 @@ def select_near_next_date(options: pd.DataFrame, date: datetime.date, constant_m
   next_date = unique_dates[target_date_idx + 1]
 
   return near_date, next_date
-
-
 
 def calc_rf_spline_k0(date: datetime.date, near_date: datetime.date, next_date: datetime.date,
                      constant_maturity: int = 30) -> tuple[float, float]:
@@ -212,10 +208,6 @@ def calc_apy(rate: float, n: int = 2) -> float:
   apy = (1 + rate / n) ** n - 1
   return apy
 
-
-import math
-
-
 def calc_sigma_sq(options: pd.DataFrame, t: float, r: float, f: float) -> float:
   """
   This function calculates the implied volatility squared (sigma^2) 
@@ -233,9 +225,6 @@ def calc_sigma_sq(options: pd.DataFrame, t: float, r: float, f: float) -> float:
   Returns:
       float: The calculated implied volatility squared (sigma^2).
   """
-
-  # Extract strike prices and calculate midpoints for call and put options
-  strike_list = pd.Series(options['strike'].values, index=options['strike'].index)
   
   # combined_df = pd.DataFrame({'Strike': strike_list, 'Call Midpoint': call_mid_point, 'Put Midpoint': put_mid_point})
   try:
@@ -243,40 +232,44 @@ def calc_sigma_sq(options: pd.DataFrame, t: float, r: float, f: float) -> float:
 
     # Evaluate Puts
     filtered_put_strikes = options[options['strike'] <= k0]
-    filtered_put_strikes = filtered_put_strikes.drop(columns=['bid', 'ask'])
+    filtered_put_strikes = filtered_put_strikes.drop(columns=['bid_x', 'ask_x', 'option_x'])
 
-    p_mask = (filtered_put_strikes['bid.1'] == 0) & (filtered_put_strikes['bid.1'].shift(-1) == 0)
+    p_mask = (filtered_put_strikes['bid_y'] == 0) & (filtered_put_strikes['bid_y'].shift(-1) == 0)
     if p_mask.any():
       p_max_row = filtered_put_strikes.index[p_mask].tolist()[-1]
       filtered_put_strikes = filtered_put_strikes[filtered_put_strikes.index >= p_max_row + 2]
-      filtered_put_strikes = filtered_put_strikes[filtered_put_strikes['bid.1'] != 0.0]
+      filtered_put_strikes = filtered_put_strikes[filtered_put_strikes['bid_y'] != 0.0]
   
     # Evaluate Calls
     filtered_call_strikes = options[options['strike'] >= k0]
-    filtered_call_strikes = filtered_call_strikes.drop(columns=['bid.1', 'ask.1'])
+    filtered_call_strikes = filtered_call_strikes.drop(columns=['bid_y', 'ask_y', 'option_y'])
 
-    c_mask = (filtered_call_strikes['bid'] == 0) & (filtered_call_strikes['bid'].shift(-1) == 0)
+    c_mask = (filtered_call_strikes['bid_x'] == 0) & (filtered_call_strikes['bid_x'].shift(-1) == 0)
 
     if p_mask.any():
       c_max_row = filtered_call_strikes.index[c_mask].tolist()[-1]
       # Get the row numbers where the condition is met
       filtered_call_strikes = filtered_call_strikes[filtered_call_strikes.index <= c_max_row - 2]
-      filtered_call_strikes = filtered_call_strikes[filtered_call_strikes['bid'] != 0.0]
+      filtered_call_strikes = filtered_call_strikes[filtered_call_strikes['bid_x'] != 0.0]
 
-    put_mid_point = (filtered_put_strikes['bid.1'] + filtered_put_strikes['ask.1']) / 2
-    call_mid_point = (filtered_call_strikes['bid'] + filtered_call_strikes['ask']) / 2
+    put_mid_point = (filtered_put_strikes['bid_y'] + filtered_put_strikes['ask_y']) / 2
+    call_mid_point = (filtered_call_strikes['bid_x'] + filtered_call_strikes['ask_x']) / 2
 
     put_call_mid_point = (put_mid_point.iloc[-1] + call_mid_point.iloc[0]) / 2
     
     put_mid_point_filtered = put_mid_point.iloc[:-1]  # Exclude first and last row
-    new_index = put_mid_point_filtered.index.max() + 1
-    put_mid_point_filtered.loc[new_index] = put_call_mid_point
+    k0_index = options[options['strike'] == k0].index[0]
+    put_mid_point_filtered.loc[k0_index] = put_call_mid_point
 
     call_mid_point_filtered = call_mid_point.iloc[1:] 
 
     merged_options = pd.concat([put_mid_point_filtered, call_mid_point_filtered], axis=0)
 
+
+      # Extract strike prices and calculate midpoints for call and put options
+    strike_list = pd.Series(options['strike'].values, index=options['strike'].index)
     strike_list_filtered = strike_list[merged_options.index]
+    
 
     strike_merged_df = pd.concat([merged_options, strike_list_filtered], axis=1)
     strike_merged_df.columns = (['price', 'strike'])
@@ -314,8 +307,7 @@ def calc_sigma_sq(options: pd.DataFrame, t: float, r: float, f: float) -> float:
   except:
     print("The VIX cannot be calculated for this date.")
 
-
-def calc_vix(date: datetime.date, options_data_source: int = 3, days: int = 30) -> float:
+def calc_vix(date: datetime.date, options: pd.DataFrame, days: int = 30) -> float:
   """
   This function calculates the VIX (Volatility Index) for a given date based 
   on the implied volatility of SPX options using the closing prices on the 
@@ -330,26 +322,10 @@ def calc_vix(date: datetime.date, options_data_source: int = 3, days: int = 30) 
       float: The calculated VIX value.
   """
 
-  # Read SPX options data (assuming 'data/may_spx_quotedata.csv' format)
-  if options_data_source == 1:
-    options = pd.read_csv('data/spx_quotedata.csv', skiprows=3) # for cboe download
-    options.columns = [col.lower().replace(' ', '_') for col in options.columns]
-    now = datetime.datetime.now()
-    hour=now.hour
-    minute=now.minute
-    second=now.second
-  elif options_data_source == 2:
-    options = pd.read_csv('data/spx_quotedata.csv')
-    options.columns = [col.lower().replace(' ', '_') for col in options.columns]
-    now = datetime.datetime.now()
-    hour=now.hour
-    minute=now.minute
-    second=now.second
-  elif options_data_source == 3:
-    options = pd.read_csv('data/vix_options.csv') # Testing
-    hour=10
-    minute=45
-    second=0
+  now = datetime.datetime.now()
+  hour=now.hour
+  minute=now.minute
+  second=now.second
 
   # Select the nearest and next to nearest expiration dates
   near_date, next_date = select_near_next_date(options=options, date=date)
@@ -361,6 +337,7 @@ def calc_vix(date: datetime.date, options_data_source: int = 3, days: int = 30) 
 
   # Standard time for calculations (10:45 AM)
   day_start_time = datetime.time(hour=hour, minute=minute, second=second)
+  print('day start time: ', day_start_time)
 
   # Calculate time to expiration in minutes for near and next options
   near_minute_diff = minute_diff(datetime1=datetime.datetime.combine(date, day_start_time),
@@ -400,7 +377,6 @@ def calc_vix(date: datetime.date, options_data_source: int = 3, days: int = 30) 
   
   except:
     raise TypeError("The VIX calculation could not be completed")
-
 
 def get_month_abbreviation(date_obj):
   """
@@ -597,7 +573,6 @@ def generate_unix_timestamps(start_date, end_date):
 
   return timestamps
 
-
 def get_date_range(start_date):
   """
   Calculates a date range centered around a given start date.
@@ -628,7 +603,6 @@ def get_date_range(start_date):
   # Return the start and end dates of the 31-day range
   return start_of_range, end_of_range
 
-
 def generate_option_urls(unix_timestamps):
   """
   Generates a list of Yahoo Finance options page URLs for the given Unix timestamps.
@@ -658,7 +632,6 @@ def generate_option_urls(unix_timestamps):
 
   # Return the list of generated URLs
   return urls
-
 
 def retrieve_yahoo_option_data(date):
 
@@ -760,29 +733,189 @@ def convert_to_int(value):
     # You can return original value, log errors, or raise exceptions
     return value
 
+def extract_expiration_date(option_name):
+  """Extracts the expiration date from the option name in '04-30-2024' format.
+
+  Args:
+      option_name (str): The option name string.
+
+  Returns:
+      str: The expiration date in '04-30-2024' format, or None if not found.
+  """
+
+  # Extract year, month, and day from the option name
+  year = option_name[:2]
+  month = option_name[2:4]
+  day = option_name[4:6]
+
+  # Reorder and format the date
+  expiration_date = f"{day}-{month}-{year}"
+  return expiration_date
+
+def fetch_spx_options_data(save_to_csv=False):
+  """Fetches S&P 500 options data from the CBOE API and returns the data as a dictionary.
+
+  Returns:
+      dict: The dictionary containing the S&P 500 options data retrieved from the API.
+
+  Raises:
+      requests.exceptions.RequestException: If an error occurs during the request.
+  """
+
+  url = "https://cdn.cboe.com/api/global/delayed_quotes/options/_SPX.json"
+
+  try:
+    response = requests.get(url)
+    response.raise_for_status()  # Raise an exception for unsuccessful requests
+  except requests.exceptions.RequestException as e:
+    print("An error occurred:", e)
+    return None  # Indicate error by returning None
+
+  data = response.json()
+
+  # Optional processing or logging of data (commented out)
+  print("Timestamp:", data["timestamp"])
+  print("Number of option contracts:", len(data["data"]["options"]))
+
+  if save_to_csv:
+  # Optionally, save the data to a file named "spx_options.json" (commented out)
+    with open("spx_options.json", "w") as outfile:
+      json.dump(data, outfile)
+
+  return data
+
+def process_spx_options_data(data):
+  """Processes S&P 500 options data from a dictionary and returns DataFrames for calls/puts (daily/weekly).
+
+  Args:
+      data (dict): The dictionary containing S&P 500 options data retrieved from the API.
+
+  Returns:
+      tuple: A tuple containing four DataFrames: daily calls, daily puts, weekly calls, and weekly puts.
+  """
+
+  # Get the list of options data from the JSON (assuming structure)
+  options_data = data["data"]["options"]
+
+  df = pd.DataFrame(options_data)
+
+  # Define columns to remove (as a list)
+  columns_to_remove = ['bid_size', 'ask_size', 'volume','iv', 'open_interest',
+                        'volume', 'delta', 'gamma', 'theta', 'rho', 'vega', 'theo',
+                        'change', 'open', 'high', 'low', 'tick', 'last_trade_price',
+                        'last_trade_time', 'percent_change', 'prev_day_close']
+
+  # Remove columns using drop
+  df_modified = df.drop(columns_to_remove, axis=1) 
+
+  # Extract strike prices (assuming the last 8 characters represent the strike)
+  df_modified["strike"] = df_modified["option"].str[-8:]
+
+  # Separate calls and puts based on the option type (C or P) at the 11th position
+  daily_calls = df_modified[df_modified["option"].str[9] == "C"]
+  daily_puts = df_modified[df_modified["option"].str[9] == "P"]
+  weekly_calls = df_modified[df_modified["option"].str[10] == "C"]
+  weekly_puts = df_modified[df_modified["option"].str[10] == "P"]
+
+  daily_calls = daily_calls.assign(expiration_date=daily_calls["option"].apply(extract_expiration_date))
+  daily_puts = daily_puts.assign(expiration_date=daily_puts["option"].apply(extract_expiration_date))
+  weekly_calls = weekly_calls.assign(expiration_date=weekly_calls["option"].apply(extract_expiration_date))
+  weekly_puts = weekly_puts.assign(expiration_date=weekly_puts["option"].apply(extract_expiration_date))
+
+  daily_calls = daily_calls.assign(strike=daily_calls["strike"].apply(convert_strike_to_float))
+  daily_puts = daily_puts.assign(strike=daily_puts["strike"].apply(convert_strike_to_float))
+  weekly_calls = weekly_calls.assign(strike=weekly_calls["strike"].apply(convert_strike_to_float))
+  weekly_puts = weekly_puts.assign(strike=weekly_puts["strike"].apply(convert_strike_to_float))
+
+  return daily_calls, daily_puts, weekly_calls, weekly_puts
+
+def extract_expiration_date(option_name):
+  """Extracts the expiration date from the option name in 'YYYY-MM-DD' format.
+
+  Args:
+      option_name (str): The option name string.
+
+  Returns:
+      str: The expiration date in 'YYYY-MM-DD' format, or None if not found.
+  """
+
+  if "W" in option_name[3]:  # Check for 'W' at the 4th character position
+    # Weekly option format
+    year = "20" + option_name[4:6]
+    month = option_name[6:8]
+    day = option_name[8:10]
+  else:
+    # Daily option format (assume current year)
+    year = "20" + option_name[3:5]
+    month = option_name[5:7]
+    day = option_name[7:9]
+
+  # Create the date string and return
+  return f"{year}-{month}-{day}"
+
+def convert_strike_to_float(strike_string):
+  """Converts a strike price string (e.g., "01400000") to a float.
+
+  Args:
+      strike_string (str): The strike price string.
+
+  Returns:
+      float: The strike price as a float, or None if the conversion fails.
+  """
+
+  try:
+    # Remove leading zeros and convert to float
+    strike_string = strike_string.lstrip("0")
+    strike_float = float(strike_string[:-3])
+    return strike_float
+  except ValueError:
+    print("Error: Invalid strike price format")
+    return None
+  
+def convert_to_date(date_str):
+  try:
+    # Attempt conversion using '%Y-%m-%d' format (assuming YYYY-MM-DD)
+    return pd.to_datetime(date_str, format='%Y-%m-%d').date()
+  except ValueError:
+    # Handle potential errors (e.g., invalid format)
+    return None  # Or return a specific value to indicate error
+
+def initialize_spx_options_data():
+
+  data = fetch_spx_options_data()
+  daily_calls, daily_puts, weekly_calls, weekly_puts = process_spx_options_data(data)
+
+  # Get unique expiration dates from daily options
+  daily_expirations = pd.concat([daily_calls["expiration_date"], daily_puts["expiration_date"]]).unique()
+
+  # Filter weekly options by excluding matching expiration dates
+  weekly_calls_filtered = weekly_calls[~weekly_calls["expiration_date"].isin(daily_expirations)]
+  weekly_puts_filtered = weekly_puts[~weekly_puts["expiration_date"].isin(daily_expirations)]
+
+  # Full outer merge on "strike" and "expiration_date"
+  daily_options = daily_calls.merge(daily_puts, how='outer', on=['strike', 'expiration_date'])
+
+  # Full outer merge on "strike" and "expiration_date" for weekly options
+  weekly_options = weekly_calls_filtered.merge(weekly_puts_filtered, how='outer', on=['strike', 'expiration_date'])
+
+  # Concatenate daily and weekly options
+  all_options = pd.concat([daily_options, weekly_options])
+
+  # Apply the conversion function to the 'date_string' column
+  all_options['expiration_date'] = all_options['expiration_date'].apply(convert_to_date)
+
+  return all_options
 
 
-# ---------------------------
+if __name__ == "__main__":
 
-# # Pulls from Cboe as csv from what is given here: https://www.cboe.com/delayed_quotes/spx/
-# # There is not sufficient data for an analysis, refer to function pull_spx_quote_data for data source
-# date = datetime.date.today()
-# pull_spx_quote_data(date)
-# options_data_source = 1
+  date = datetime.date.today()
 
-# # Pull options from yahoo finance website data available on website is incomplete as compared to vix example.
-# # Requires user to have Chrome installed
-# # Refer to function retrieve_yahoo_option_data for data source. 
-date = datetime.date.today()
-retrieve_yahoo_option_data(date)
-options_data_source = 2
+  # Pull interest rates
+  download_treasury_csv(date)
 
-# Explicitly set the date for calculation (replace with your desired date)
-# date = pd.to_datetime("2022-09-27").date()
-# options_data_source = 3
+  all_options = initialize_spx_options_data()
 
-# Pull interest rates
-download_treasury_csv(date)
+  vix = calc_vix(date = date, options = all_options)
 
-vix = calc_vix(date, options_data_source)
-print(f"The vix for date, {date} is {vix}.")
+  print(f"The vix for date, {date} is {vix}.")

@@ -344,8 +344,8 @@ weighted_ret_port2_components.dropna(axis=0, inplace=True)
 # Combine log returns into DataFrame for portfolio returns
 weighted_ret_port = pd.DataFrame()
 weighted_ret_port['spy'] = log_ret_spy.sum(axis=1)
-weighted_ret_port['spx_port1'] = weighted_ret_port1_components.sum(axis=1)
-weighted_ret_port['spx_port2'] = weighted_ret_port2_components.sum(axis=1)
+weighted_ret_port['eigenvector'] = weighted_ret_port1_components.sum(axis=1)
+weighted_ret_port['eigenvector/volatility'] = weighted_ret_port2_components.sum(axis=1)
 
 # # Plotting functions - not shown here (consider using as separate functions)
 # plot_weighted_ret_port(weighted_ret_port)
@@ -353,14 +353,15 @@ weighted_ret_port['spx_port2'] = weighted_ret_port2_components.sum(axis=1)
 # Calculate cumulative returns for each portfolio
 weighted_ret_port_cumm = pd.DataFrame()
 weighted_ret_port_cumm['spy'] = weighted_ret_port['spy'].cumsum()
-weighted_ret_port_cumm['spx_port1'] = weighted_ret_port['spx_port1'].cumsum()
-weighted_ret_port_cumm['spx_port2'] = weighted_ret_port['spx_port2'].cumsum()
+weighted_ret_port_cumm['eigenvector'] = weighted_ret_port['eigenvector'].cumsum()
+weighted_ret_port_cumm['eigenvector/volatility'] = weighted_ret_port['eigenvector/volatility'].cumsum()
 
 # # Plotting functions - not shown here (consider using as separate functions)
 # plot_weighted_ret_port_cumm(weighted_ret_port_cumm)
 
 weighted_ret_port_sharpe = calculate_sharpe_ratio(returns = weighted_ret_port_cumm)
 
+print("The Sharpe ratio of the original weighted portfolio is : ", weighted_ret_port_sharpe, ".")
 
 """
 
@@ -414,17 +415,19 @@ filtered_log_ret_sp500 = log_ret_sp500[filtered_volatility.keys()]
 weighted_ret_port3_components = filtered_log_ret_sp500 * eigenvectors_norm_3
 weighted_ret_port3_components.dropna(axis=0, inplace=True)
 
-weighted_ret_port['spx_port3'] = weighted_ret_port3_components.sum(axis=1)
+weighted_ret_port['modified eigenvector/volatility'] = weighted_ret_port3_components.sum(axis=1)
 
 # # Plotting functions - not shown here (consider using as separate functions)
 # plot_weighted_ret_port(weighted_ret_port)
 
-weighted_ret_port_cumm['spx_port3'] = weighted_ret_port['spx_port3'].cumsum()
+weighted_ret_port_cumm['modified eigenvector/volatility'] = weighted_ret_port['modified eigenvector/volatility'].cumsum()
 
 # # Plotting functions - not shown here (consider using as separate functions)
 # plot_weighted_ret_port_cumm(weighted_ret_port_cumm)
 
 weighted_ret_port_sharpe = calculate_sharpe_ratio(returns = weighted_ret_port_cumm)
+print("The Sharpe ratio of the modified weighted portfolio is : ")
+print(weighted_ret_port_sharpe)
 
 """
 
@@ -434,6 +437,9 @@ the Sharpe ratio by roughly 33 percent. There most certainly is a Sharpe maximiz
 portfolio which would provide the greatest market opportunity. But for this analysis
 we can certainly see that by removing the stocks with the greatest portfolio we have
 increased the Sharpe. One can see that the returns are minutely weaker, but there
-are remedies to this as mentioned earlier.
+are remedies to this ass mentioned earlier.
 
 """
+
+# # Plotting functions - not shown here (consider using as separate functions)
+plot_weighted_ret_port_cumm(weighted_ret_port_cumm)
